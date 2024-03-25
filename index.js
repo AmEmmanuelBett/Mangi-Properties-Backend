@@ -70,7 +70,7 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-app.post("/properties", authenticateToken, async (req, res) => {
+app.post("/properties", async (req, res) => {
   const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
   const image = req.files?.image;
 
