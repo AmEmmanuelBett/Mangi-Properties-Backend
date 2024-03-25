@@ -1,5 +1,7 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 const bodyParser = require("body-parser");
 const fileUpload = require("express-fileupload");
 const { put, list, get, remove } = require('@vercel/blob');
@@ -30,7 +32,13 @@ admin.initializeApp({
   credential: admin.credential.cert(firebaseConfig),
   databaseURL: firebaseDatabaseURL
 });
-
+const transporter = nodemailer.createTransport({
+  service: "Gmail",
+  auth: {
+    user: process.env.USER_EMAIL,
+    pass: process.env.USER_PASSWORD,
+  },
+});
 // Vercel Blob settings
 const vercelStoreId = process.env.V_STORE_ID;
 const vercelToken = process.env.V_TOKEN;
@@ -300,6 +308,66 @@ app.post("/submit", (req, res) => {
   });
 });
 
+// Dummy database to store generated OTPs
+const otpDB = {};
+
+// Middleware
+app.use(bodyParser.json());
+
+// Generate OTP and send it to the user's email
+app.post('/generate-otp', (req, res) => {
+  const email = process.env.USER_EMAIL
+  const otp = Math.floor(100000 + Math.random() * 900000); // Generate 6-digit OTP
+  otpDB[email] = otp;
+
+
+
+  const mailOptions = {
+    from: 'emmanuel4cheru@gmail.com', // Replace with your email
+    to: email,
+    subject: 'OTP for Real Estate Management',
+    text: `Your OTP for Real Estate Management is: ${otp}`
+  };
+
+  transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      console.error('Error sending OTP:', error);
+      res.status(500).json({ message: 'Failed to send OTP' });
+    } else {
+      console.log('OTP sent:', info.response);
+      res.json({ message: 'OTP sent successfully' });
+    }
+  });
+});
+
+// Verify OTP and issue JWT token
+app.post('/verify-otp', (req, res) => {
+  console.log("called")
+  const { otp } = req.body;
+  let email = process.env.USER_EMAIL
+  const storedOTP = otpDB[email];
+
+  if (storedOTP && storedOTP.toString() === otp.toString()) {
+    // OTP verification successful, issue JWT token
+    const token = jwt.sign({ email }, 'YOUR_SECRET_KEY', { expiresIn: '2h' }); // Replace with your secret key
+    res.json({ token });
+  } else {
+    res.status(401).json({ message: 'Invalid OTP' });
+  }
+});
+
+// Verify JWT token
+app.post('/verify-token', (req, res) => {
+  const { token } = req.body;
+  jwt.verify(token, 'YOUR_SECRET_KEY', (err, decoded) => { // Replace with your secret key
+    if (err) {
+      res.status(401).json({ message: 'Invalid token' });
+    } else {
+      // Token is valid
+      res.json({ message: 'Token verified' });
+    }
+  });
+});
 
 // Start the server
 app.listen(port, () => {
