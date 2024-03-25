@@ -70,7 +70,7 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-app.post("/properties", async (req, res) => {
+app.post("/properties", authenticateToken, async (req, res) => {
   const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
   const image = req.files?.image;
 
@@ -115,7 +115,7 @@ app.post("/properties", async (req, res) => {
 
 // Get properties
 // Get properties
-app.get("/properties", authenticateToken, async (req, res) => {
+app.get("/properties", async (req, res) => {
   try {
     const snapshot = await admin.database().ref('properties').once('value');
     const properties = [];
