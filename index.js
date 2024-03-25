@@ -11,7 +11,7 @@ require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
-
+const secretToken = process.env.SECRET_TOKEN_KEY
 // Middleware
 app.use(cors({ origin: '*' })); // Allow requests from any origin
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -58,8 +58,19 @@ const updateImagePath = (property) => {
     imageUrl: property.imageUrl
   };
 };
-
-app.post("/properties", async (req, res) => {
+// Middleware to authenticate requests
+const authenticateToken = (req, res, next) => {
+  let token = req.headers['authorization'];
+  if (!token) return res.status(401).json({ message: 'Authorization token not found' });
+  token = token.split(" ")[1]
+  //console.log(token)
+  jwt.verify(token, secretToken, (err, decoded) => {
+    if (err) return res.status(401).json({ message: 'Invalid token' });
+    req.user = decoded;
+    next();
+  });
+};
+app.post("/properties", authenticateToken, async (req, res) => {
   const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
   const image = req.files?.image;
 
@@ -104,7 +115,7 @@ app.post("/properties", async (req, res) => {
 
 // Get properties
 // Get properties
-app.get("/properties", async (req, res) => {
+app.get("/properties", authenticateToken, async (req, res) => {
   try {
     const snapshot = await admin.database().ref('properties').once('value');
     const properties = [];
@@ -112,7 +123,7 @@ app.get("/properties", async (req, res) => {
       const property = childSnapshot.val();
       properties.push(updateImagePath({ id: childSnapshot.key, ...property }));
     });
-    console.log(properties); // Add parentheses after console.log
+    //console.log(properties); // Add parentheses after //console.log
     res.send(properties);
   } catch (error) {
     console.error('Failed to fetch properties:', error);
@@ -123,7 +134,7 @@ app.get("/properties", async (req, res) => {
 
 
 // Fetch a single property by ID
-app.get("/properties/:id", async (req, res) => {
+app.get("/properties/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const snapshot = await admin.database().ref(`properties/${id}`).once('value');
@@ -138,7 +149,7 @@ app.get("/properties/:id", async (req, res) => {
 
 
 // Edit property with new fields and image handling
-app.put("/properties/:id", async (req, res) => {
+app.put("/properties/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
 
@@ -173,7 +184,7 @@ app.put("/properties/:id", async (req, res) => {
       property: updates
     });
   } catch (error) {
-    console.error('Failed to update property:', error);
+    //console.error('Failed to update property:', error);
     res.status(500).send('Failed to update property.');
   }
 });
@@ -181,7 +192,7 @@ app.put("/properties/:id", async (req, res) => {
 
 // Delete property
 // Delete property
-app.delete("/properties/:id", async (req, res) => {
+app.delete("/properties/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -211,7 +222,7 @@ app.delete("/properties/:id", async (req, res) => {
 });
 // Handle form submission
 app.post("/submit", (req, res) => {
-  console.log(req.body);
+  //console.log(req.body);
   const formData = req.body;
 
   // Create the HTML email template
@@ -302,7 +313,7 @@ app.post("/submit", (req, res) => {
       console.error("Error sending email:", error);
       return res.sendFile(__dirname + '/error.html'); // Make sure the path is correct
     } else {
-      console.log("Email sent:", info.response);
+      //console.log("Email sent:", info.response);
       return res.sendFile(__dirname + '/success.html'); // Make sure the path is correct
     }
   });
@@ -334,7 +345,7 @@ app.post('/generate-otp', (req, res) => {
       console.error('Error sending OTP:', error);
       res.status(500).json({ message: 'Failed to send OTP' });
     } else {
-      console.log('OTP sent:', info.response);
+      //console.log('OTP sent:', info.response);
       res.json({ message: 'OTP sent successfully' });
     }
   });
@@ -342,14 +353,14 @@ app.post('/generate-otp', (req, res) => {
 
 // Verify OTP and issue JWT token
 app.post('/verify-otp', (req, res) => {
-  console.log("called")
+  //console.log("called")
   const { otp } = req.body;
   let email = process.env.USER_EMAIL
   const storedOTP = otpDB[email];
 
   if (storedOTP && storedOTP.toString() === otp.toString()) {
     // OTP verification successful, issue JWT token
-    const token = jwt.sign({ email }, 'YOUR_SECRET_KEY', { expiresIn: '2h' }); // Replace with your secret key
+    const token = jwt.sign({ email }, secretToken, { expiresIn: '2h' }); // Replace with your secret key
     res.json({ token });
   } else {
     res.status(401).json({ message: 'Invalid OTP' });
@@ -359,7 +370,7 @@ app.post('/verify-otp', (req, res) => {
 // Verify JWT token
 app.post('/verify-token', (req, res) => {
   const { token } = req.body;
-  jwt.verify(token, 'YOUR_SECRET_KEY', (err, decoded) => { // Replace with your secret key
+  jwt.verify(token, secretToken, (err, decoded) => { // Replace with your secret key
     if (err) {
       res.status(401).json({ message: 'Invalid token' });
     } else {
