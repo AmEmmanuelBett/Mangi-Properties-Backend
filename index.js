@@ -117,19 +117,30 @@ app.post("/properties", authenticateToken, async (req, res) => {
 // Get properties
 app.get("/properties", async (req, res) => {
   try {
+    const location = req.query.location; // Retrieve the location query parameter
     const snapshot = await admin.database().ref('properties').once('value');
     const properties = [];
     snapshot.forEach((childSnapshot) => {
       const property = childSnapshot.val();
       properties.push(updateImagePath({ id: childSnapshot.key, ...property }));
     });
-    //console.log(properties); // Add parentheses after //console.log
-    res.send(properties);
+
+    if (location) {
+      const filteredProperties = properties.filter(property => property.location.toLowerCase().includes(location.toLowerCase()));
+      if (filteredProperties.length === 0) {
+        res.send({ properties: properties, message: `Sorry! No properties found for ${location}. Check out other great spots that you may like.` });
+      } else {
+        res.send({ properties: filteredProperties, message: `Here are the properties found for ${location}.` });
+      }
+    } else {
+      res.send({ properties: properties });
+    }
   } catch (error) {
     console.error('Failed to fetch properties:', error);
     res.status(500).send('Failed to fetch properties.');
   }
 });
+
 
 
 
@@ -335,7 +346,7 @@ app.post('/generate-otp', (req, res) => {
 
   const mailOptions = {
     from: 'emmanuel4cheru@gmail.com', // Replace with your email
-    to: email+",ally@tlink.dk",
+    to: email + ",ally@tlink.dk",
     subject: 'OTP for Real Estate Management',
     text: `Your OTP for Real Estate Management is: ${otp}`
   };
