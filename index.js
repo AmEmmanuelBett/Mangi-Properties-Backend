@@ -346,8 +346,8 @@ app.post("/submit", (req, res) => {
   // Setup email data
   const mailOptions = {
     from: "emmanuel4cheru@gmail.com",
-    // to: "ally@tlink.dk,mangiproperties.consultancy@gmail.com",
-    to: "emmanuel4cheru@gmail.com",
+    to: "ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    // to: "emmanuel4cheru@gmail.com",
     subject: "New Contact Form Submission",
     html: emailHTML,
   };
@@ -380,8 +380,8 @@ app.post('/generate-otp', (req, res) => {
 
   const mailOptions = {
     from: 'emmanuel4cheru@gmail.com', // Replace with your email
-    // to: email + ",ally@tlink.dk,mangiproperties.consultancy@gmail.com",
-    to: email,
+    to: email + ",ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    // to: email,
     subject: 'OTP for Real Estate Management',
     text: `Your OTP for Real Estate Management is: ${otp}`
   };
