@@ -8,7 +8,11 @@ const { put, list, get, remove } = require('@vercel/blob');
 const admin = require('firebase-admin');
 const path = require('path');
 require('dotenv').config();
+const loggingMiddleware = require('./middleware');
 
+
+
+// Apply logging middleware globally
 const app = express();
 const port = process.env.PORT || 3000;
 const secretToken = process.env.SECRET_TOKEN_KEY
@@ -18,6 +22,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.use(fileUpload());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(loggingMiddleware);
 
 // Firebase initialization
 const firebaseConfig = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY || "{}");
@@ -70,36 +75,43 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+// POST /properties - Add or update a property
 app.post("/properties", authenticateToken, async (req, res) => {
   const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
-  const image = req.files?.image;
+  const images = req.files?.images; // Accept an array of images
 
-  if (!image) {
-    return res.status(400).send('No image file was uploaded.');
+  if (!images || images.length === 0) {
+    return res.status(400).send('No image files were uploaded.');
   }
 
-  const imagePath = `uploads/${Date.now()}_${image.name}`;
+  const imageUrls = [];
+
+  // Upload up to 5 images
+  for (let i = 0; i < Math.min(images.length, 5); i++) {
+    const imagePath = `uploads/${Date.now()}_${images[i].name}`;
+    try {
+      const response = await put(imagePath, images[i].data, vercelSettings);
+      const imageUrl = response.url;
+      imageUrls.push(imageUrl);
+    } catch (err) {
+      console.error('Error uploading image:', err);
+      return res.status(500).send('Failed to upload images.');
+    }
+  }
+
+  const propertyData = {
+    name,
+    location,
+    description,
+    price: price || 0,
+    bedrooms: bedrooms || 0,
+    bathrooms: bathrooms || 0,
+    propertyType: propertyType || "Rent",
+    period: period || "",
+    imageUrls: imageUrls // Store URLs of all uploaded images
+  };
 
   try {
-    const response = await put(imagePath, image.data, vercelSettings);
-    const imageUrl = response.url;
-
-    if (!imageUrl) {
-      return res.status(500).send('Failed to upload the image.');
-    }
-
-    const propertyData = {
-      name,
-      location,
-      description,
-      price: price || 0,
-      bedrooms: bedrooms || 0,
-      bathrooms: bathrooms || 0,
-      propertyType: propertyType || "Rent",
-      period: period || "", // Include period field
-      imageUrl: imageUrl // Store image path for later retrieval
-    };
-
     const propertyRef = admin.database().ref('properties').push();
     await propertyRef.set(propertyData);
 
@@ -113,16 +125,18 @@ app.post("/properties", authenticateToken, async (req, res) => {
   }
 });
 
-// Get properties
-// Get properties
+
+// GET /properties - Retrieve properties
 app.get("/properties", async (req, res) => {
   try {
-    const location = req.query.location; // Retrieve the location query parameter
+    const location = req.query.location;
     const snapshot = await admin.database().ref('properties').once('value');
     const properties = [];
     snapshot.forEach((childSnapshot) => {
       const property = childSnapshot.val();
-      properties.push(updateImagePath({ id: childSnapshot.key, ...property }));
+      // Provide links to all uploaded images
+      const propertyWithImageUrls = updateImagePath({ id: childSnapshot.key, ...property });
+      properties.push(propertyWithImageUrls);
     });
 
     if (location) {
@@ -141,16 +155,77 @@ app.get("/properties", async (req, res) => {
   }
 });
 
+// PUT /properties/:id - Update a property
+app.put("/properties/:id", authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
+  const images = req.files?.images; // Accept an array of images
+
+  try {
+    const propertyRef = admin.database().ref(`properties/${id}`);
+    const existingPropertySnapshot = await propertyRef.once('value');
+    const existingProperty = existingPropertySnapshot.val();
+
+    if (!existingProperty) {
+      return res.status(404).send({ message: "Property not found." });
+    }
+
+    const existingImageUrls = existingProperty.imageUrls || [];
+    const newImageUrls = [];
+
+    // Upload up to 5 new images
+    if (images && images.length > 0) {
+      for (let i = 0; i < Math.min(images.length, 5); i++) {
+        const imagePath = `uploads/${Date.now()}_${images[i].name}`;
+        try {
+          const response = await put(imagePath, images[i].data, vercelSettings);
+          const imageUrl = response.url;
+          newImageUrls.push(imageUrl);
+        } catch (err) {
+          console.error('Error uploading image:', err);
+          return res.status(500).send('Failed to upload images.');
+        }
+      }
+    }
+
+    const updates = {
+      name: name || existingProperty.name,
+      location: location || existingProperty.location,
+      description: description || existingProperty.description,
+      price: price || existingProperty.price,
+      bedrooms: bedrooms || existingProperty.bedrooms,
+      bathrooms: bathrooms || existingProperty.bathrooms,
+      propertyType: propertyType || existingProperty.propertyType,
+      period: period || existingProperty.period,
+      imageUrls: [...existingImageUrls, ...newImageUrls] // Combine existing and new image URLs
+    };
+
+    await propertyRef.update(updates);
+    res.send({
+      message: "Property updated successfully.",
+      property: updates
+    });
+  } catch (error) {
+    console.error('Failed to update property:', error);
+    res.status(500).send('Failed to update property.');
+  }
+});
 
 
 
-// Fetch a single property by ID
+
+// GET /properties/:id - Retrieve a single property
 app.get("/properties/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const snapshot = await admin.database().ref(`properties/${id}`).once('value');
     const property = snapshot.val();
-    res.send(property);
+    if (!property) {
+      return res.status(404).send({ message: "Property not found." });
+    }
+    // Provide links to all uploaded images
+    const propertyWithImageUrls = updateImagePath({ id: snapshot.key, ...property });
+    res.send(propertyWithImageUrls);
   } catch (error) {
     console.error('Failed to fetch property:', error);
     res.status(500).send('Failed to fetch property.');
@@ -159,50 +234,7 @@ app.get("/properties/:id", authenticateToken, async (req, res) => {
 
 
 
-// Edit property with new fields and image handling
-app.put("/properties/:id", authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { name, location, description, price, bedrooms, bathrooms, propertyType, period } = req.body;
-
-  try {
-    const image = req.files?.image;
-    let imageUrl = null;
-
-    if (image) {
-      const imagePath = `uploads/${Date.now()}_${image.name}`;
-      const response = await put(imagePath, image.data, vercelSettings);
-      imageUrl = response.url;
-    }
-
-    const updates = {
-      name,
-      location,
-      description,
-      price: price || 0,
-      bedrooms: bedrooms || 0,
-      bathrooms: bathrooms || 0,
-      propertyType: propertyType || "Rent",
-      period: period || "", // Include period field
-    };
-
-    if (imageUrl) {
-      updates.imageUrl = imageUrl;
-    }
-
-    await admin.database().ref(`properties/${id}`).update(updates);
-    res.send({
-      message: "Property updated successfully.",
-      property: updates
-    });
-  } catch (error) {
-    //console.error('Failed to update property:', error);
-    res.status(500).send('Failed to update property.');
-  }
-});
-
-
-// Delete property
-// Delete property
+// DELETE /properties/:id - Delete a property
 app.delete("/properties/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
 
@@ -215,15 +247,15 @@ app.delete("/properties/:id", authenticateToken, async (req, res) => {
       return res.status(404).send({ message: "Property not found." });
     }
 
-    // const imageUrl = property.imageUrl;
+    const imageUrls = property.imageUrls || [];
 
-    // // If property has an associated image, delete the image
-    // if (imageUrl) {
-    //   await remove(imageUrl, vercelSettings);
-    // }
-
-    // Remove property from the database
+    // Delete the property from the database
     await admin.database().ref(`properties/${id}`).remove();
+
+    // If property had associated images, delete them
+    for (const imageUrl of imageUrls) {
+      await remove(imageUrl, vercelSettings);
+    }
 
     res.send({ message: "Property deleted successfully." });
   } catch (error) {
@@ -231,6 +263,7 @@ app.delete("/properties/:id", authenticateToken, async (req, res) => {
     res.status(500).send('Failed to delete property.');
   }
 });
+
 // Handle form submission
 app.post("/submit", (req, res) => {
   //console.log(req.body);
@@ -313,7 +346,8 @@ app.post("/submit", (req, res) => {
   // Setup email data
   const mailOptions = {
     from: "emmanuel4cheru@gmail.com",
-    to: "ally@tlink.dk,emmanuel4cheru@gmail.com,mangiproperties.consultancy@gmail.com",
+    // to: "ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    to: "emmanuel4cheru@gmail.com",
     subject: "New Contact Form Submission",
     html: emailHTML,
   };
@@ -346,7 +380,8 @@ app.post('/generate-otp', (req, res) => {
 
   const mailOptions = {
     from: 'emmanuel4cheru@gmail.com', // Replace with your email
-    to: email + ",ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    // to: email + ",ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    to: email,
     subject: 'OTP for Real Estate Management',
     text: `Your OTP for Real Estate Management is: ${otp}`
   };
@@ -364,7 +399,7 @@ app.post('/generate-otp', (req, res) => {
 
 // Verify OTP and issue JWT token
 app.post('/verify-otp', (req, res) => {
-  //console.log("called")
+  console.log("called")
   const { otp } = req.body;
   let email = process.env.USER_EMAIL
   const storedOTP = otpDB[email];
