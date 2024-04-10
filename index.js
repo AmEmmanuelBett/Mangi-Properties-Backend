@@ -35,7 +35,9 @@ if (!firebaseConfig.project_id || !firebaseConfig.private_key || !firebaseDataba
 
 admin.initializeApp({
   credential: admin.credential.cert(firebaseConfig),
-  databaseURL: firebaseDatabaseURL
+  databaseURL: firebaseDatabaseURL,
+  storageBucket: "gs://mangi-properties-d5980.appspot.com"
+
 });
 const transporter = nodemailer.createTransport({
   service: "Gmail",
@@ -44,6 +46,8 @@ const transporter = nodemailer.createTransport({
     pass: process.env.USER_PASSWORD,
   },
 });
+var bucket = admin.storage().bucket();
+
 // Vercel Blob settings
 const vercelStoreId = process.env.V_STORE_ID;
 const vercelToken = process.env.V_TOKEN;
@@ -87,17 +91,60 @@ app.post("/properties", authenticateToken, async (req, res) => {
   const imageUrls = [];
 
   // Upload up to 5 images
+  // const imagePath = `uploads/${Date.now()}_${images[i].name}`;
+  // const response = await put(imagePath, images[i].data, vercelSettings);
   for (let i = 0; i < Math.min(images.length, 5); i++) {
-    const imagePath = `uploads/${Date.now()}_${images[i].name}`;
     try {
-      const response = await put(imagePath, images[i].data, vercelSettings);
-      const imageUrl = response.url;
-      imageUrls.push(imageUrl);
-    } catch (err) {
-      console.error('Error uploading image:', err);
+      const image = images[i];
+      const fileName = images[i].name; // Adjust the file name as per your requirement
+      const fileUpload = bucket.file(fileName);
+
+      // Upload the image to Firebase Storage
+      await new Promise((resolve, reject) => {
+        const stream = fileUpload.createWriteStream({
+          metadata: {
+            contentType: image.mimetype,
+          },
+          resumable: false,
+        });
+
+        stream.on('error', (error) => {
+          reject(error);
+        });
+
+        stream.on('finish', () => {
+          // Make the file publicly accessible (optional)
+          fileUpload.makePublic()
+            .then(() => {
+              const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+              imageUrls.push(publicUrl);
+              resolve();
+            })
+            .catch((error) => {
+              reject(error);
+            });
+        });
+
+        stream.end(image.data);
+      });
+    } catch (error) {
+      console.error('Error uploading image:', error);
       return res.status(500).send('Failed to upload images.');
     }
   }
+
+  // for (let i = 0; i < Math.min(images.length, 5); i++) {
+  //   try {
+  //     console.log(images[i])
+  //     const response = await bucket.upload(images[i])
+
+  //     const imageUrl = response.url;
+  //     imageUrls.push(imageUrl);
+  //   } catch (err) {
+  //     console.error('Error uploading image:', err);
+  //     return res.status(500).send('Failed to upload images.');
+  //   }
+  // }
 
   const propertyData = {
     name,
@@ -176,18 +223,47 @@ app.put("/properties/:id", authenticateToken, async (req, res) => {
     // Upload up to 5 new images
     if (images && images.length > 0) {
       for (let i = 0; i < Math.min(images.length, 5); i++) {
-        const imagePath = `uploads/${Date.now()}_${images[i].name}`;
         try {
-          const response = await put(imagePath, images[i].data, vercelSettings);
-          const imageUrl = response.url;
-          newImageUrls.push(imageUrl);
-        } catch (err) {
-          console.error('Error uploading image:', err);
+          const image = images[i];
+          const fileName = images[i].name; // Adjust the file name as per your requirement
+          const fileUpload = bucket.file(fileName);
+
+          // Upload the image to Firebase Storage
+          await new Promise((resolve, reject) => {
+            const stream = fileUpload.createWriteStream({
+              metadata: {
+                contentType: image.mimetype,
+              },
+              resumable: false,
+            });
+
+            stream.on('error', (error) => {
+              reject(error);
+            });
+
+            stream.on('finish', () => {
+              // Make the file publicly accessible (optional)
+              fileUpload.makePublic()
+                .then(() => {
+                  const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+                  newImageUrls.push(publicUrl);
+                  resolve();
+                })
+                .catch((error) => {
+                  reject(error);
+                });
+            });
+
+            stream.end(image.data);
+          });
+        } catch (error) {
+          console.error('Error uploading image:', error);
           return res.status(500).send('Failed to upload images.');
         }
       }
     }
-
+    let finalImages = [...existingImageUrls, ...newImageUrls];
+    finalImages = Array.from(new Set(finalImages));
     const updates = {
       name: name || existingProperty.name,
       location: location || existingProperty.location,
@@ -197,7 +273,7 @@ app.put("/properties/:id", authenticateToken, async (req, res) => {
       bathrooms: bathrooms || existingProperty.bathrooms,
       propertyType: propertyType || existingProperty.propertyType,
       period: period || existingProperty.period,
-      imageUrls: [...existingImageUrls, ...newImageUrls] // Combine existing and new image URLs
+      imageUrls: finalImages
     };
 
     await propertyRef.update(updates);
@@ -253,9 +329,9 @@ app.delete("/properties/:id", authenticateToken, async (req, res) => {
     await admin.database().ref(`properties/${id}`).remove();
 
     // If property had associated images, delete them
-    for (const imageUrl of imageUrls) {
-      await remove(imageUrl, vercelSettings);
-    }
+    // for (const imageUrl of imageUrls) {
+    //   await remove(imageUrl, vercelSettings);
+    // }
 
     res.send({ message: "Property deleted successfully." });
   } catch (error) {
@@ -346,8 +422,8 @@ app.post("/submit", (req, res) => {
   // Setup email data
   const mailOptions = {
     from: "emmanuel4cheru@gmail.com",
-    to: "ally@tlink.dk,mangiproperties.consultancy@gmail.com",
-    // to: "emmanuel4cheru@gmail.com",
+    // to: "ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    to: "emmanuel4cheru@gmail.com",
     subject: "New Contact Form Submission",
     html: emailHTML,
   };
@@ -380,8 +456,8 @@ app.post('/generate-otp', (req, res) => {
 
   const mailOptions = {
     from: 'emmanuel4cheru@gmail.com', // Replace with your email
-    to: email + ",ally@tlink.dk,mangiproperties.consultancy@gmail.com",
-    // to: email,
+    // to: email + ",ally@tlink.dk,mangiproperties.consultancy@gmail.com",
+    to: email,
     subject: 'OTP for Real Estate Management',
     text: `Your OTP for Real Estate Management is: ${otp}`
   };
